@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>IS 2500 Sampling Calculator</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background: #f4f8fb;
+    margin: 0; padding: 20px;
+    color: #222;
+  }
+  h1 {
+    text-align: center;
+    font-size: 1.6rem;
+    margin-bottom: 18px;
+    color: #004a80;
+  }
+  .container {
+    max-width: 750px; margin: auto;
+    background: white; padding: 20px;
+    border-radius: 14px; box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+  }
+  label { font-weight: bold; margin-top: 12px; display: block; }
+  input, select {
+    width: 100%; padding: 10px; margin-top: 6px;
+    border: 1px solid #ccc; border-radius: 6px; font-size: 1rem;
+  }
+  button {
+    margin-top: 16px; padding: 12px;
+    background: #0078d4; color: white;
+    font-size: 1.05rem; border: none; border-radius: 8px;
+    cursor: pointer; width: 100%;
+  }
+  button:hover { background: #005fa3; }
+  .card {
+    margin-top: 20px; padding: 16px;
+    border-radius: 10px; background: #f9fcff;
+    border: 1px solid #d5e7f8;
+  }
+  .result {
+    font-size: 1.2rem; font-weight: bold;
+    margin-bottom: 12px; color: #004a80;
+  }
+  .accept { color: green; font-weight: bold; }
+  .reject { color: #b00020; font-weight: bold; }
+  ul { margin: 6px 0 0 20px; }
+  footer {
+    margin-top: 18px; font-size: 0.85rem; color: #555; text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<h1>📊 IS 2500 Sampling Calculator</h1>
+
+<div class="container">
+  <form onsubmit="event.preventDefault(); calculate();">
+    <label>📦 Number of Carton Boxes</label>
+    <input id="boxes" type="number" min="1" value="100" required />
+
+    <label>🔢 Units per Box</label>
+    <input id="perBox" type="number" min="1" value="10" required />
+
+    <label>🏷️ Inspection Level</label>
+    <select id="inspLevel">
+      <option value="II" selected>Level II (default)</option>
+      <option value="I">Level I (less strict)</option>
+      <option value="III">Level III (more strict)</option>
+    </select>
+
+    <label>🎯 AQL % (Acceptable Quality Level)</label>
+    <select id="aql">
+      <option value="0.65">0.65% (Critical)</option>
+      <option value="1.0">1.0%</option>
+      <option value="1.5">1.5%</option>
+      <option value="2.5" selected>2.5% (Major)</option>
+      <option value="4.0">4.0% (Minor)</option>
+      <option value="6.5">6.5%</option>
+    </select>
+
+    <button type="submit">🚀 Calculate Sampling Plan</button>
+  </form>
+
+  <div id="output" class="card" style="display:none">
+    <div id="summary" class="result"></div>
+    <div id="details"></div>
+
+    <div class="card" id="defectEntry" style="display:none">
+      <h3>🧾 Enter Observed Defects</h3>
+      <label>Critical Defects</label>
+      <input type="number" id="critDef" value="0" min="0" />
+      <label>Major Defects</label>
+      <input type="number" id="majDef" value="0" min="0" />
+      <label>Minor Defects</label>
+      <input type="number" id="minDef" value="0" min="0" />
+      <button onclick="checkDefects()">✅ Check Acceptance</button>
+      <div id="defectResult" style="margin-top:12px;font-weight:bold;"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>📝 Defect Classification</h3>
+    <ul>
+      <li><b>Critical:</b> Unsafe/harmful → AQL 0.65% (usually <span class="reject">Ac=0</span>)</li>
+      <li><b>Major:</b> Affects usability → AQL 2.5%</li>
+      <li><b>Minor:</b> Cosmetic only → AQL 4.0%</li>
+    </ul>
+  </div>
+</div>
+
+<footer>
+  Based on IS 2500 / ISO 2859-1 Standard Tables (Normal Inspection)<br>
+  Accept if defects ≤ Ac ✅ | Reject if defects ≥ Re ❌
+</footer>
+
+<script>
+// Table 1 – Lot size → code letter (General Inspection I/II/III)
+const table1 = [
+  {min:2,max:8,I:'A',II:'A',III:'B'},
+  {min:9,max:15,I:'A',II:'B',III:'C'},
+  {min:16,max:25,I:'B',II:'C',III:'D'},
+  {min:26,max:50,I:'C',II:'D',III:'E'},
+  {min:51,max:90,I:'C',II:'E',III:'F'},
+  {min:91,max:150,I:'D',II:'F',III:'G'},
+  {min:151,max:280,I:'E',II:'G',III:'H'},
+  {min:281,max:500,I:'F',II:'H',III:'J'},
+  {min:501,max:1200,I:'G',II:'J',III:'K'},
+  {min:1201,max:3200,I:'H',II:'K',III:'L'},
+  {min:3201,max:10000,I:'J',II:'L',III:'M'},
+  {min:10001,max:35000,I:'K',II:'M',III:'N'},
+  {min:35001,max:150000,I:'L',II:'N',III:'P'},
+  {min:150001,max:500000,I:'M',II:'P',III:'Q'},
+  {min:500001,max:999999999,I:'N',II:'Q',III:'R'}
+];
+
+// Master table: sample sizes + Ac/Re per AQL
+const master = [
+  {code:'A', n:2,   aql:{'0.65':[0,1],'1.0':[0,1],'1.5':[0,1],'2.5':[0,1],'4.0':[0,1],'6.5':[0,1]}},
+  {code:'B', n:3,   aql:{'0.65':[0,1],'1.0':[0,1],'1.5':[0,1],'2.5':[0,1],'4.0':[0,1],'6.5':[0,1]}},
+  {code:'C', n:5,   aql:{'0.65':[0,1],'1.0':[0,1],'1.5':[0,1],'2.5':[0,1],'4.0':[0,1],'6.5':[1,2]}},
+  {code:'D', n:8,   aql:{'0.65':[0,1],'1.0':[0,1],'1.5':[0,1],'2.5':[0,1],'4.0':[1,2],'6.5':[1,2]}},
+  {code:'E', n:13,  aql:{'0.65':[0,1],'1.0':[0,1],'1.5':[0,1],'2.5':[0,1],'4.0':[1,2],'6.5':[2,3]}},
+  {code:'F', n:20,  aql:{'0.65':[0,1],'1.0':[0,1],'1.5':[1,2],'2.5':[1,2],'4.0':[2,3],'6.5':[3,4]}},
+  {code:'G', n:32,  aql:{'0.65':[0,1],'1.0':[1,2],'1.5':[1,2],'2.5':[2,3],'4.0':[3,4],'6.5':[5,6]}},
+  {code:'H', n:50,  aql:{'0.65':[1,2],'1.0':[1,2],'1.5':[2,3],'2.5':[3,4],'4.0':[5,6],'6.5':[7,8]}},
+  {code:'J', n:80,  aql:{'0.65':[1,2],'1.0':[2,3],'1.5':[3,4],'2.5':[5,6],'4.0':[7,8],'6.5':[10,11]}},
+  {code:'K', n:125, aql:{'0.65':[2,3],'1.0':[3,4],'1.5':[5,6],'2.5':[7,8],'4.0':[10,11],'6.5':[14,15]}},
+  {code:'L', n:200, aql:{'0.65':[3,4],'1.0':[5,6],'1.5':[7,8],'2.5':[10,11],'4.0':[14,15],'6.5':[21,22]}},
+  {code:'M', n:315, aql:{'0.65':[5,6],'1.0':[7,8],'1.5':[10,11],'2.5':[14,15],'4.0':[21,22],'6.5':[21,22]}},
+  {code:'N', n:500, aql:{'0.65':[7,8],'1.0':[10,11],'1.5':[14,15],'2.5':[21,22],'4.0':[21,22],'6.5':[21,22]}},
+  {code:'P', n:800, aql:{'0.65':[10,11],'1.0':[14,15],'1.5':[21,22],'2.5':[21,22],'4.0':[21,22],'6.5':[21,22]}},
+  {code:'Q', n:1250,aql:{'0.65':[14,15],'1.0':[21,22],'1.5':[21,22],'2.5':[21,22],'4.0':[21,22],'6.5':[21,22]}},
+  {code:'R', n:2000,aql:{'0.65':[21,22],'1.0':[21,22],'1.5':[21,22],'2.5':[21,22],'4.0':[21,22],'6.5':[21,22]}}
+];
+
+let currentRules = {}; // store acceptance limits for later defect check
+
+function findCode(lot, lvl){
+  for (let r of table1) if (lot>=r.min && lot<=r.max) return r[lvl];
+  return 'R';
+}
+
+function calculate(){
+  const boxes = +document.getElementById('boxes').value;
+  const perBox = +document.getElementById('perBox').value;
+  const lvl = document.getElementById('inspLevel').value;
+  const aql = document.getElementById('aql').value;
+  const lot = boxes * perBox;
+
+  const code = findCode(lot, lvl);
+  const row = master.find(r => r.code === code);
+  const n = row ? row.n : lot;
+  const perBoxSample = Math.ceil(n/boxes);
+
+  const rule = row && row.aql[aql] ? {ac:row.aql[aql][0], re:row.aql[aql][1]}
+                                   : {ac:Math.floor(n*aql/100), re:Math.floor(n*aql/100)+1};
+
+  // save rules for later defect checking
+  currentRules = {aql, ac:rule.ac, re:rule.re};
+
+  document.getElementById('output').style.display='block';
+  document.getElementById('summary').innerHTML =
+    `📦 Lot Size: <b>${lot}</b> → Code: <b>${code}</b> → Sample <b>${n}</b> items`;
+
+  document.getElementById('details').innerHTML = `
+    🔢 <b>Boxes:</b> ${boxes} × ${perBox} units<br>
+    🏷️ <b>Inspection Level:</b> ${lvl}<br>
+    🎯 <b>AQL:</b> ${aql}%<br><br>
+    📌 Take about <b>${perBoxSample}</b> samples per box (≈${n} total)<br><br>
+    ✅ <span class="accept">Acceptance (Ac): ${rule.ac}</span><br>
+    ❌ <span class="reject">Rejection (Re): ${rule.re}</span><br><br>
+    👉 <b>Rule:</b> Accept if ≤ ${rule.ac} defective. Reject if ≥ ${rule.re} defective.
+  `;
+
+  document.getElementById('defectEntry').style.display='block';
+}
+
+function checkDefects(){
+  const crit = +document.getElementById('critDef').value;
+  const maj = +document.getElementById('majDef').value;
+  const min = +document.getElementById('minDef').value;
+  let msg = "";
+
+  // mapping AQL % to defect type
+  if (crit > currentRules.ac && currentRules.aql === "0.65") {
+    msg += "❌ Critical defects exceed limit!<br>";
+  }
+  if (maj > currentRules.ac && currentRules.aql === "2.5") {
+    msg += "❌ Major defects exceed limit!<br>";
+  }
+  if (min > currentRules.ac && currentRules.aql === "4.0") {
+    msg += "❌ Minor defects exceed limit!<br>";
+  }
+
+  if (!msg) msg = "✅ Lot ACCEPTED (within defect limits)";
+  else msg += "<br>👉 Lot REJECTED";
+
+  document.getElementById('defectResult').innerHTML = msg;
+}
+</script>
+</body>
+</html>
